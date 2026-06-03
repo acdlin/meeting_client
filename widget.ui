@@ -84,7 +84,7 @@
          <item>
           <widget class="QLineEdit" name="ip_edit">
            <property name="text">
-            <string>192.168.93.130</string>
+            <string>192.168.93.131</string>
            </property>
            <property name="placeholderText">
             <string/>
@@ -123,7 +123,7 @@
      <item>
       <widget class="QTabWidget" name="tabWidget">
        <property name="currentIndex">
-        <number>1</number>
+        <number>0</number>
        </property>
        <widget class="QWidget" name="tab1">
         <attribute name="title">
@@ -141,13 +141,13 @@
         </attribute>
         <layout class="QVBoxLayout" name="verticalLayout_3" stretch="10,2,1">
          <item>
-          <widget class="QListWidget" name="listWidget_2"/>
+          <widget class="QListWidget" name="msg_list_widget"/>
          </item>
          <item>
-          <widget class="QPlainTextEdit" name="plainTextEdit"/>
+          <widget class="QPlainTextEdit" name="send_msg_text_edit"/>
          </item>
          <item>
-          <widget class="QPushButton" name="pushButton">
+          <widget class="QPushButton" name="send_msg_btn">
            <property name="text">
             <string>发送</string>
            </property>
