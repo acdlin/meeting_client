@@ -20,12 +20,15 @@ void MyTcpSocket::connectToServer(const QString& ip , quint16 port)
     connectToHost(ip , port);
 }
 
+
+
 void MyTcpSocket::handleReadyRead()
 {
     m_recv_buf.append(this->readAll());
     while (true) {
         // 1. 找帧头 $
         int start = m_recv_buf.indexOf('$');
+
         if (start == -1) break;
 
         // 2. $ 后面至少要有 header(11字节) + 1字节的 # 尾部
@@ -55,9 +58,9 @@ void MyTcpSocket::handleReadyRead()
 
         // 6. 取出完整帧，解析
         QByteArray frame = m_recv_buf.mid(start, totalLen);
-        qDebug() << "frame get";
         sendFrame(frame);
         m_recv_buf.remove(0, start + totalLen);
+
     }
 
 }
@@ -66,7 +69,6 @@ void MyTcpSocket::sendFrame(const QByteArray& frameByte)
 {
     quint16 n_type;
     memcpy(&n_type, frameByte.constData() + 1, 2);
-    qDebug() << "sendFrame 收到帧, type:" << qFromBigEndian(n_type);
 
     if(frameByte.size() < 12)
     {
@@ -89,6 +91,6 @@ void MyTcpSocket::sendFrame(const QByteArray& frameByte)
         return;
     }
     QByteArray data = frameByte.mid(11 , len);
-    qDebug() << "send frame";
+    qDebug() << data.toHex();
     emit messageRecevied(msg_type , ip , data);
 }

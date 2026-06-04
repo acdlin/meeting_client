@@ -8,6 +8,7 @@
 #include <QRegularExpressionValidator>
 #include <QScreen>
 #include <QTcpSocket>
+#include <QTimer>
 
 quint64 makeKey(quint32 ip , quint16 port)
 {
@@ -25,7 +26,9 @@ Widget::Widget(QWidget *parent)
         qDebug() << "头像加载失败，检查qrc路径和文件名";
     }
 
+
     ui->setupUi(this);
+    ui->send_msg_text_edit->installEventFilter(this);
     QScreen* screen = QApplication::primaryScreen();
     QRect rect = screen->availableGeometry();
     int wid = static_cast<int>(rect.width() * 0.8);
@@ -75,13 +78,17 @@ Widget::Widget(QWidget *parent)
 
 
     connect(m_socket , &MyTcpSocket::connected ,this , [=](){
-        QMessageBox::information(this , "成功" , "已连接至指定位置");
+        QTimer::singleShot(0 , this , [=](){
+            QMessageBox::information(this , "成功" , "已连接至指定位置");
+        });
         ui->connect_btn->setDisabled(true);
         ui->create_meeting_btn->setDisabled(false);
         ui->join_meeting_btn->setDisabled(false);
     });
     connect(m_socket , &MyTcpSocket::errorOccurred , this , [=](QAbstractSocket::SocketError){
-        QMessageBox::warning(this , "失败" , m_socket->errorString());
+        QTimer::singleShot(0 , this , [=](){
+            QMessageBox::warning(this , "失败" , m_socket->errorString());
+        });
         ui->connect_btn->setDisabled(false);
         ui->create_meeting_btn->setDisabled(true);
         ui->join_meeting_btn->setDisabled(true);
@@ -118,7 +125,9 @@ void Widget::connect_to_server()
     if(!ip_regex.match(ip).hasMatch())
     {
         QString msg = QString("错误的ip: %1").arg(ip);
-        QMessageBox::warning(this , "错误" , msg);
+        QTimer::singleShot(0 , this , [=](){
+            QMessageBox::warning(this , "错误" , msg);
+        });
         return;
     }
 
@@ -127,7 +136,9 @@ void Widget::connect_to_server()
     if(!ok || port_num > 65535 || port_num < 0)
     {
         QString msg = QString("错误的port: %1").arg(port);
-        QMessageBox::warning(this , "错误" , msg);
+        QTimer::singleShot(0 , this , [=](){
+            QMessageBox::warning(this , "错误" , msg);
+        });
         return;
     }
     m_socket->connectToServer(ip , port_num);
@@ -182,11 +193,15 @@ void Widget::handleMessage(msgType type , quint32 ip , QByteArray data)
         quint32 roomNo = qFromBigEndian<quint32>(data.constData());
         if(roomNo <= 100000)
         {
-            QMessageBox::information(this , "错误" , "创建房间失败");
+            QTimer::singleShot(0 , this , [=](){
+                QMessageBox::information(this , "错误" , "创建房间失败");
+            });
         }
         else
         {
-            qDebug() << "创建房间成功:" << roomNo;
+            QTimer::singleShot(0 , this , [=](){
+                QMessageBox::information(this , "成功" , "成功创建房间");
+            });
             ui->out_log->setText(QString("已加入房间%1").arg(roomNo));
             ui->meeting_no_edit->setText(QString::number(roomNo));
             ui->create_meeting_btn->setDisabled(true);
@@ -203,11 +218,15 @@ void Widget::handleMessage(msgType type , quint32 ip , QByteArray data)
         quint32 roomNo = qFromBigEndian<quint32>(data.constData());
         if(roomNo == 0)
         {
-            QMessageBox::information(this , "失败"  , "加入房间失败");
+            QTimer::singleShot(0 , this , [=](){
+                QMessageBox::information(this , "失败"  , "加入房间失败");
+            });
         }
         else if(roomNo > 100000)
         {
-            QMessageBox::information(this , "成功" , "成功加入房间");
+            QTimer::singleShot(0 , this , [=](){
+                    QMessageBox::information(this , "成功" , "成功加入房间");
+            });
             ui->create_meeting_btn->setDisabled(true);
             ui->join_meeting_btn->setDisabled(true);
             ui->exit_meeting_btn->setDisabled(false);
@@ -247,7 +266,6 @@ void Widget::handleMessage(msgType type , quint32 ip , QByteArray data)
             ds >> ip >> port;
             if(ds.status() != QDataStream::Ok)
             {
-                qDebug() << "QDataStream break, status:" << ds.status();
                 break;
             }
             QString name = QString("user_%1").arg(roommember_count++);
@@ -262,6 +280,23 @@ void Widget::handleMessage(msgType type , quint32 ip , QByteArray data)
             qDebug() << "Adding partner IP:" << QHostAddress(ip).toString()
                      << "port:" << port;
         }
+    }
+    else if(type == msgType::PARTNER_EXIT)
+    {
+        quint16 port = qFromBigEndian<quint16>(data.constData());
+        quint64 key = makeKey(ip , port);
+        QListWidgetItem* itemToRemove = m_partnerMap.value(key , nullptr);
+        if(itemToRemove!= nullptr)
+        {
+            QWidget* itemWidget = ui->partner_list_widget->itemWidget(itemToRemove);
+            if(itemWidget!= nullptr)
+            {
+                delete itemWidget;
+            }
+            int row = ui->partner_list_widget->row(itemToRemove);
+            delete ui->partner_list_widget->takeItem(row);
+            m_partnerMap.remove(key);
+        }
 
     }
 }
@@ -273,7 +308,9 @@ void Widget::join_meeting()
     quint32 n_room_id = qToBigEndian(room_id);
     if(!ok || room_id < 100001)
     {
-        QMessageBox::information(this , "错误" , "检查房间号");
+        QTimer::singleShot(0 , this , [=](){
+            QMessageBox::information(this , "错误" , "检查房间号");
+        });
         return;
     }
     MESG msg;
@@ -283,6 +320,26 @@ void Widget::join_meeting()
     memcpy(msg.data.data() , &n_room_id , sizeof(quint32));
     QByteArray byteArray = packMessage(msg);
     m_socket->write(byteArray);
+}
+
+bool Widget::eventFilter(QObject *watched , QEvent* event)
+{
+    if(watched == ui->send_msg_text_edit && event->type() == QEvent::KeyPress)
+    {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+        if(keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter)
+        {
+            if(keyEvent->modifiers() & Qt::ShiftModifier)
+            {
+                return false;
+            }
+
+            ui->send_msg_btn->click();
+
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched , event);
 }
 
 

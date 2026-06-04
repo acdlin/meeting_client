@@ -20,6 +20,9 @@ public:
     Widget(QWidget *parent = nullptr);
     ~Widget();
 
+protected:
+    bool eventFilter(QObject * watched , QEvent *event) override;
+
 private:
     Ui::Widget *ui;
     QPixmap m_avatar;
