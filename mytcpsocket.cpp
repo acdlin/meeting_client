@@ -91,6 +91,5 @@ void MyTcpSocket::sendFrame(const QByteArray& frameByte)
         return;
     }
     QByteArray data = frameByte.mid(11 , len);
-    qDebug() << data.toHex();
     emit messageRecevied(msg_type , ip , data);
 }

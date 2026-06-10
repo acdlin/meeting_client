@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1131</width>
-    <height>780</height>
+    <width>1389</width>
+    <height>994</height>
    </rect>
   </property>
   <property name="minimumSize">
@@ -19,8 +19,8 @@
   <property name="windowTitle">
    <string>Widget</string>
   </property>
-  <layout class="QVBoxLayout" name="verticalLayout" stretch="1,5,1,1">
-   <item>
+  <layout class="QGridLayout" name="gridLayout">
+   <item row="0" column="0">
     <widget class="QGroupBox" name="top_box">
      <property name="title">
       <string/>
@@ -118,8 +118,8 @@
      </layout>
     </widget>
    </item>
-   <item>
-    <layout class="QHBoxLayout" name="horizontalLayout_2" stretch="1,3">
+   <item row="1" column="0">
+    <layout class="QHBoxLayout" name="horizontalLayout_2" stretch="1,4">
      <item>
       <widget class="QTabWidget" name="tabWidget">
        <property name="currentIndex">
@@ -158,24 +158,25 @@
       </widget>
      </item>
      <item>
-      <widget class="QGroupBox" name="groupBox_8">
-       <property name="title">
-        <string>主屏幕</string>
+      <widget class="QScrollArea" name="scrollArea">
+       <property name="widgetResizable">
+        <bool>true</bool>
        </property>
-       <layout class="QGridLayout" name="gridLayout">
-        <item row="0" column="0">
-         <widget class="QLabel" name="label">
-          <property name="text">
-           <string/>
-          </property>
-         </widget>
-        </item>
-       </layout>
+       <widget class="QWidget" name="show_scroll_area">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>1084</width>
+          <height>693</height>
+         </rect>
+        </property>
+       </widget>
       </widget>
      </item>
     </layout>
    </item>
-   <item>
+   <item row="2" column="0">
     <widget class="QGroupBox" name="control_box">
      <property name="title">
       <string/>
@@ -206,12 +207,26 @@
          <item>
           <widget class="QPushButton" name="open_audio_btn">
            <property name="text">
-            <string>开启音频</string>
+            <string>打开麦克风</string>
            </property>
           </widget>
          </item>
          <item>
           <widget class="QSlider" name="audio_slider">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="open_audio_out_btn">
+           <property name="text">
+            <string>打开听筒</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QSlider" name="audio_out_slider">
            <property name="orientation">
             <enum>Qt::Horizontal</enum>
            </property>
@@ -239,7 +254,7 @@
      </layout>
     </widget>
    </item>
-   <item>
+   <item row="3" column="0">
     <widget class="QGroupBox" name="log_box">
      <property name="title">
       <string>日志输出</string>
