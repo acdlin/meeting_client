@@ -12,6 +12,10 @@ AudioOutput::AudioOutput(QObject *parent):QObject(parent)
     m_audioOutput = new QAudioOutput(m_format , this);
     connect(m_audioOutput , &QAudioOutput::notify , this ,[=](){
         QAudio::Error err = m_audioOutput->error();
+        if(err == QAudio::NoError && err != QAudio::UnderrunError)
+        {
+            return;
+        }
         qWarning() << "AudioInput error:" << err;
         emit audioError(err);
     });

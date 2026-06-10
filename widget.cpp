@@ -478,6 +478,8 @@ void Widget::handleMessage(msgType type , quint32 ip , QByteArray data)
             m_gridLayout->addWidget(cell , row , col);
             m_videoCellMap.insert(key , cell);
             m_videoCellCount++;
+            qDebug() << "PARTNER_JOIN: ip =" << QHostAddress(ip).toString()
+                     << "port =" << port << "key =" << key;
         }
     }
     else if(type == msgType::PARTNER_EXIT)
@@ -518,9 +520,15 @@ void Widget::handleMessage(msgType type , quint32 ip , QByteArray data)
     else if(type == msgType::IMG_RECV)
     {
         quint16 port = qFromBigEndian<quint16>(data.constData());
-        quint64 key = makeKey(ip , port);
-        QByteArray jpg = qUncompress(data.mid(2));
+        qDebug() << "RECV ：" << QHostAddress(ip).toString()
+                 << "port =" << port ;
+        quint64 key = makeKey(ip, port);
+        QByteArray compressed = data.mid(2);
+
+        QByteArray jpg = qUncompress(compressed);
+
         QImage img = QImage::fromData(jpg);
+
         VideoCell* cell = m_videoCellMap.value(key, nullptr);
         if(cell != nullptr)
         {
