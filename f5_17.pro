@@ -18,18 +18,21 @@ SOURCES += \
     netheader.cpp \
     partner.cpp \
     videocell.cpp \
-    widget.cpp
+    widget.cpp \
+    writeworker.cpp
 
 HEADERS += \
     audioinput.h \
     audiooutput.h \
+    blockqueue.h \
     chatmessage.h \
     mytcpsocket.h \
     myvideosurface.h \
     netheader.h \
     partner.h \
     videocell.h \
-    widget.h
+    widget.h \
+    writeworker.h
 
 FORMS += \
     widget.ui

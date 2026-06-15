@@ -2,6 +2,7 @@
 #include "ui_widget.h"
 #include "ChatMessage.h"
 #include "partner.h"
+#include "blockqueue.h"
 #include "netheader.h"
 #include <QMessageBox>
 #include <QRegularExpression>
@@ -10,6 +11,11 @@
 #include <QTcpSocket>
 #include <QTimer>
 #include <QBuffer>
+
+
+QUEUE_DATA<MESG> queue_send(2000);
+QUEUE_DATA<MESG> queue_recv(500);
+QUEUE_DATA<MESG> audio_queue_recv(200);
 
 quint64 makeKey(quint32 ip , quint16 port)
 {
@@ -21,12 +27,24 @@ Widget::Widget(QWidget *parent)
     : QWidget(parent)
     , ui(new Ui::Widget),m_avatar(":/images/avator.jpg"),roommember_count(1),m_videoCellCount(1),m_cameraOn(false),m_audioInputOn(false),m_audioOutputOn(false)
 {
+
+
+    m_sockThread = new QThread(this);
     m_audioOutput = new AudioOutput(this);
     m_audioInput = new AudioInput(this);
     m_camera = new QCamera(this);
     m_videosurface = new MyVideoSurface;
     m_camera->setViewfinder(m_videosurface);
     m_socket = new MyTcpSocket();
+    m_writeWorker = new WriteWorker(m_socket);
+    m_socket->moveToThread(m_sockThread);
+    m_writeWorker->moveToThread(m_sockThread);
+
+    connect(m_sockThread , &QThread::finished , m_socket , &QObject::deleteLater);
+    connect(m_sockThread , &QThread::finished , m_writeWorker , &QObject::deleteLater);
+
+    QMetaObject::invokeMethod(m_writeWorker , &WriteWorker::start , Qt::QueuedConnection);
+    m_sockThread->start();
     if(m_avatar.isNull())
     {
         qDebug() << "头像加载失败，检查qrc路径和文件名";
@@ -154,8 +172,12 @@ Widget::Widget(QWidget *parent)
     connect(ui->exit_meeting_btn , &QPushButton::clicked , this , [=](){
         MESG msg;
         msg.msg_type = msgType::EXIT_MEETING;
-        msg.ip = m_socket->localAddress().toIPv4Address();
-        m_socket->write(packMessage(msg));
+        if(m_localIp == 0 || m_localPort == 0)
+        {
+            return;
+        }
+        msg.ip = m_localIp;
+        queue_send.push_msg(msg);
         if(m_audioInputOn)
         {
             m_audioInput->stopCollect();
@@ -220,12 +242,15 @@ Widget::Widget(QWidget *parent)
             m_camera->stop();
             m_selfCell->clearImage();
             MESG msg;
-            msg.ip = m_socket->localAddress().toIPv4Address();
+            if(m_localIp == 0 || m_localPort == 0)
+            {
+                return;
+            }
+            msg.ip = m_localIp;
             msg.msg_type = msgType::CLOSE_CAMERA;
-            quint16 port = m_socket->localPort();
-            quint16 n_port = qToBigEndian(port);
+            quint16 n_port = qToBigEndian(m_localPort);
             msg.data.append(reinterpret_cast<const char*>(&n_port) , sizeof(n_port));
-            m_socket->write(packMessage(msg));
+            queue_send.push_msg(msg);
         }
         else
         {
@@ -238,18 +263,22 @@ Widget::Widget(QWidget *parent)
 
     connect(m_videosurface , &MyVideoSurface::frameAvailable , this , &Widget::handle_frame);
 
-    connect(m_socket , &MyTcpSocket::connected ,this , [=](){
+    connect(m_socket , &MyTcpSocket::connectedInfo ,this , [=](quint32 ip , quint16 port){
         QTimer::singleShot(0 , this , [=](){
             QMessageBox::information(this , "成功" , "已连接至指定位置");
         });
         ui->connect_btn->setDisabled(true);
         ui->create_meeting_btn->setDisabled(false);
         ui->join_meeting_btn->setDisabled(false);
+        m_localIp = ip;
+        m_localPort = port;
+
 
     });
-    connect(m_socket , &MyTcpSocket::errorOccurred , this , [=](QAbstractSocket::SocketError){
+
+    connect(m_socket , &MyTcpSocket::errorInfo , this , [=](QString errorString){
         QTimer::singleShot(0 , this , [=](){
-            QMessageBox::warning(this , "失败" , m_socket->errorString());
+            QMessageBox::warning(this , "失败" , errorString);
         });
         ui->connect_btn->setDisabled(false);
         ui->create_meeting_btn->setDisabled(true);
@@ -279,6 +308,15 @@ Widget::Widget(QWidget *parent)
 
 Widget::~Widget()
 {
+    QMetaObject::invokeMethod(m_writeWorker , &WriteWorker::stop , Qt::QueuedConnection);
+    queue_send.clear();
+
+    QMetaObject::invokeMethod(m_socket , [this](){
+        m_socket->close();
+    },Qt::BlockingQueuedConnection);
+    m_sockThread->quit();
+    m_sockThread->wait();
+
     delete ui;
 }
 
@@ -310,7 +348,7 @@ void Widget::connect_to_server()
         });
         return;
     }
-    m_socket->connectToServer(ip , port_num);
+    QMetaObject::invokeMethod(m_socket , "connectToServer", Qt::QueuedConnection , Q_ARG(const QString , ip) , Q_ARG(quint16 , port_num));
 
 }
 
@@ -336,21 +374,28 @@ void Widget::send_msg()
 
     MESG msgToSend;
     msgToSend.msg_type = msgType::TEXT_SEND;
-    msgToSend.ip = m_socket->localAddress().toIPv4Address();
-    quint16 port = m_socket->localPort();
+    if(m_localIp == 0 || m_localPort == 0)
+    {
+        return;
+    }
+    msgToSend.ip = m_localIp;
+    quint16 port = m_localPort;
     quint16 n_port = qToBigEndian(port);
     msgToSend.data.append(reinterpret_cast<const char*>(&n_port) , sizeof(n_port));
     msgToSend.data.append(qCompress(text.toUtf8()));
-    m_socket->write(packMessage(msgToSend));
+    queue_send.push_msg(msgToSend);
 }
 
 void Widget::create_meeting()
 {
     MESG msg;
     msg.msg_type = msgType::CREATE_MEETING;
-    msg.ip = m_socket->localAddress().toIPv4Address();
-    QByteArray byteArray = packMessage(msg);
-    m_socket->write(byteArray);
+    if(m_localIp == 0 || m_localPort == 0)
+    {
+        return;
+    }
+    msg.ip = m_localIp;
+    queue_send.push_msg(msg);
     roommember_count = 1;
 }
 
@@ -523,9 +568,7 @@ void Widget::handleMessage(msgType type , quint32 ip , QByteArray data)
         qDebug() << "RECV ：" << QHostAddress(ip).toString()
                  << "port =" << port ;
         quint64 key = makeKey(ip, port);
-        QByteArray compressed = data.mid(2);
-
-        QByteArray jpg = qUncompress(compressed);
+        QByteArray jpg = data.mid(2);
 
         QImage img = QImage::fromData(jpg);
 
@@ -561,11 +604,14 @@ void Widget::join_meeting()
     }
     MESG msg;
     msg.msg_type = msgType::JOIN_MEETING;
-    msg.ip = m_socket->localAddress().toIPv4Address();
+    if(m_localIp == 0 || m_localPort == 0)
+    {
+        return;
+    }
+    msg.ip = m_localIp;
     msg.data.resize(sizeof(quint32));
     memcpy(msg.data.data() , &n_room_id , sizeof(quint32));
-    QByteArray byteArray = packMessage(msg);
-    m_socket->write(byteArray);
+    queue_send.push_msg(msg);
 }
 
 bool Widget::eventFilter(QObject *watched , QEvent* event)
@@ -595,33 +641,42 @@ void Widget::handle_frame(QImage image)
         return ;
     }
     m_selfCell->setImage(image);
+
+    if(queue_send.size() > 10)
+    {
+        return;
+    }
     QBuffer buffer;
     buffer.open(QIODevice::WriteOnly);
-    image.save(&buffer , "JPEG" , 50);
-
-    QByteArray compressed = qCompress(buffer.data());
+    image.save(&buffer , "JPEG" , 30);
 
     MESG msg;
     msg.msg_type = msgType::IMG_SEND;
-    msg.ip = m_socket->localAddress().toIPv4Address();
-    quint16 port = m_socket->localPort();
-    quint16 n_port = qToBigEndian(port);
+    if(m_localIp == 0 || m_localPort == 0)
+    {
+        return;
+    }
+    msg.ip = m_localIp;
+    quint16 n_port = qToBigEndian(m_localPort);
     msg.data.append(reinterpret_cast<const char *>(& n_port), sizeof(n_port));
-    msg.data.append(compressed);
-    m_socket->write(packMessage(msg));
+    msg.data.append(buffer.data());
+    queue_send.push_msg(msg);
 }
 
 void Widget::onAudioData(const QByteArray pcm)
 {
     MESG msg;
-    msg.ip = m_socket->localAddress().toIPv4Address();
+    if(m_localIp == 0 || m_localPort == 0)
+    {
+        return;
+    }
+    msg.ip = m_localIp;
     msg.msg_type = msgType::AUDIO_SEND;
-    quint16 port = m_socket->localPort();
-    quint16 n_port = qToBigEndian(port);
+    quint16 n_port = qToBigEndian(m_localPort);
     msg.data.append(reinterpret_cast<const char*>(&n_port) , sizeof(n_port));
     QByteArray compressed = qCompress(pcm);
     msg.data.append(compressed);
-    m_socket->write(packMessage(msg));
+    queue_send.push_msg(msg);
 }
 
 

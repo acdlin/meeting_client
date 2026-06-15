@@ -4,6 +4,7 @@
 #include <QTcpSocket>
 #include <QtEndian>
 #include "netheader.h"
+#include "blockqueue.h"
 
 class MyTcpSocket : public QTcpSocket
 {
@@ -11,17 +12,22 @@ class MyTcpSocket : public QTcpSocket
 public:
     explicit MyTcpSocket(QObject * parent = nullptr);
     void close() override;
-    void connectToServer(const QString& ip , quint16 port);
     void sendFrame(const QByteArray&);
 
 private:
     QByteArray m_recv_buf;
+
+
+public slots:
+    void connectToServer(const QString& ip , quint16 port);
 
 private slots:
     void handleReadyRead();
 
 signals:
     void messageRecevied(msgType type , quint32 ip, QByteArray data);
+    void connectedInfo(quint32 ip , quint16 port);
+    void errorInfo(QString errorInfo);
 };
 
 #endif // MYTCPSOCKET_H

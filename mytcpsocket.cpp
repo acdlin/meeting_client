@@ -1,9 +1,17 @@
 ﻿#include "mytcpsocket.h"
 #include <cstring>
+#include <QHostAddress>
+#include <QThread>
 
 MyTcpSocket::MyTcpSocket(QObject *parent) : QTcpSocket(parent)
 {
     connect(this , &QTcpSocket::readyRead , this , &MyTcpSocket::handleReadyRead);
+    connect(this , &QTcpSocket::connected , this  , [=](){
+        emit connectedInfo(this->localAddress().toIPv4Address() , this->localPort());
+    });
+    connect(this , &QTcpSocket::errorOccurred , this , [=](){
+        emit errorInfo(errorString());
+    });
 }
 
 void MyTcpSocket::close()
@@ -18,6 +26,7 @@ void MyTcpSocket::connectToServer(const QString& ip , quint16 port)
         QTcpSocket::disconnectFromHost();
     }
     connectToHost(ip , port);
+
 }
 
 

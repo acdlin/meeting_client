@@ -6,11 +6,13 @@
 #include "audioinput.h"
 #include "videocell.h"
 #include "audiooutput.h"
+#include "writeworker.h"
 #include <QWidget>
 #include <QMap>
 #include <QListWidgetItem>
 #include <QCamera>
 #include <QGridLayout>
+#include <QThread>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -46,6 +48,10 @@ private:
     bool m_audioInputOn;
     AudioOutput *m_audioOutput;
     bool m_audioOutputOn;
+    QThread *m_sockThread;
+    WriteWorker *m_writeWorker;
+    quint32 m_localIp = 0;
+    quint16 m_localPort = 0;
 
 private slots:
     void connect_to_server();
