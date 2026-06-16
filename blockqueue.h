@@ -87,5 +87,6 @@ private:
 extern QUEUE_DATA<MESG> queue_send;
 extern QUEUE_DATA<MESG> queue_recv;
 extern QUEUE_DATA<MESG> audio_queue_recv;
+extern QUEUE_DATA<MESG> video_queue_recv;
 
 #endif // BLOCKQUEUE_H

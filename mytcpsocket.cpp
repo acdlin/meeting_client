@@ -100,5 +100,9 @@ void MyTcpSocket::sendFrame(const QByteArray& frameByte)
         return;
     }
     QByteArray data = frameByte.mid(11 , len);
-    emit messageRecevied(msg_type , ip , data);
+    MESG msg;
+    msg.ip = ip;
+    msg.msg_type = msg_type;
+    msg.data = data;
+    queue_recv.push_msg(msg);
 }

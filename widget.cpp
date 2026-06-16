@@ -15,6 +15,7 @@
 
 QUEUE_DATA<MESG> queue_send(2000);
 QUEUE_DATA<MESG> queue_recv(500);
+QUEUE_DATA<MESG> video_queue_recv(500);
 QUEUE_DATA<MESG> audio_queue_recv(200);
 
 quint64 makeKey(quint32 ip , quint16 port)
