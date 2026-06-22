@@ -17,6 +17,7 @@ SOURCES += \
     myvideosurface.cpp \
     netheader.cpp \
     partner.cpp \
+    sendimg.cpp \
     videocell.cpp \
     widget.cpp \
     writeworker.cpp
@@ -30,6 +31,7 @@ HEADERS += \
     myvideosurface.h \
     netheader.h \
     partner.h \
+    sendimg.h \
     videocell.h \
     widget.h \
     writeworker.h

@@ -25,9 +25,9 @@ private slots:
     void handleReadyRead();
 
 signals:
-    void messageRecevied(msgType type , quint32 ip, QByteArray data);
     void connectedInfo(quint32 ip , quint16 port);
     void errorInfo(QString errorInfo);
+    void dataReady();
 };
 
 #endif // MYTCPSOCKET_H

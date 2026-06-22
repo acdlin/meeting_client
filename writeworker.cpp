@@ -29,10 +29,6 @@ void WriteWorker::drainOnce()
     {
         if(m_socket)
         {
-            if(m_socket->bytesToWrite() > 100 * 1024)
-            {
-                break;
-            }
             m_socket->write(packMessage(msg));
         }
     }

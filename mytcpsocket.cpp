@@ -76,13 +76,13 @@ void MyTcpSocket::handleReadyRead()
 
 void MyTcpSocket::sendFrame(const QByteArray& frameByte)
 {
-    quint16 n_type;
-    memcpy(&n_type, frameByte.constData() + 1, 2);
-
     if(frameByte.size() < 12)
     {
         return ;
     }
+    quint16 n_type;
+    memcpy(&n_type, frameByte.constData() + 1, 2);
+
     const char* pointer = frameByte.constData() + 1;
 
     quint16 type = qFromBigEndian(n_type);
@@ -105,4 +105,5 @@ void MyTcpSocket::sendFrame(const QByteArray& frameByte)
     msg.msg_type = msg_type;
     msg.data = data;
     queue_recv.push_msg(msg);
+    emit dataReady();
 }

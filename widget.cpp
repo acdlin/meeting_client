@@ -4,6 +4,7 @@
 #include "partner.h"
 #include "blockqueue.h"
 #include "netheader.h"
+#include "sendimg.h"
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
@@ -15,8 +16,6 @@
 
 QUEUE_DATA<MESG> queue_send(2000);
 QUEUE_DATA<MESG> queue_recv(500);
-QUEUE_DATA<MESG> video_queue_recv(500);
-QUEUE_DATA<MESG> audio_queue_recv(200);
 
 quint64 makeKey(quint32 ip , quint16 port)
 {
@@ -28,8 +27,8 @@ Widget::Widget(QWidget *parent)
     : QWidget(parent)
     , ui(new Ui::Widget),m_avatar(":/images/avator.jpg"),roommember_count(1),m_videoCellCount(1),m_cameraOn(false),m_audioInputOn(false),m_audioOutputOn(false)
 {
-
-
+    m_videoSendThread = new SendImg(this);
+    m_videoSendThread->start();
     m_sockThread = new QThread(this);
     m_audioOutput = new AudioOutput(this);
     m_audioInput = new AudioInput(this);
@@ -106,7 +105,7 @@ Widget::Widget(QWidget *parent)
     quint16 port = 0;
     quint64 key = makeKey(ip , port);
     m_partnerMap.insert(key , item);
-
+    connect(m_videosurface, &MyVideoSurface::frameAvailable, this, &Widget::handle_frame ,Qt::QueuedConnection);
     connect(m_audioInput , &AudioInput::audioError , this , [=](QAudio::Error err){
         QTimer::singleShot(0 , this , [=](){
             QMessageBox::warning(this , "错误" ,QString("声音输入设备错误：%1").arg(err));
@@ -242,27 +241,23 @@ Widget::Widget(QWidget *parent)
             ui->out_log->setText("camera stop");
             m_camera->stop();
             m_selfCell->clearImage();
+            m_videoSendThread->setCameraStatus(false);
             MESG msg;
-            if(m_localIp == 0 || m_localPort == 0)
-            {
-                return;
-            }
             msg.ip = m_localIp;
             msg.msg_type = msgType::CLOSE_CAMERA;
-            quint16 n_port = qToBigEndian(m_localPort);
-            msg.data.append(reinterpret_cast<const char*>(&n_port) , sizeof(n_port));
             queue_send.push_msg(msg);
         }
         else
-        {
+        {   
             m_cameraOn = true;
+            qDebug() << "按钮被点击, status =" << m_camera->status();
             ui->open_camera_btn->setText("关闭摄像头");
             ui->out_log->setText("camera start");
             m_camera->start();
+            m_videoSendThread->setCameraStatus(true);
         }
     });
-
-    connect(m_videosurface , &MyVideoSurface::frameAvailable , this , &Widget::handle_frame);
+    connect(m_socket , &MyTcpSocket::dataReady , this , &Widget::handleMessage);
 
     connect(m_socket , &MyTcpSocket::connectedInfo ,this , [=](quint32 ip , quint16 port){
         QTimer::singleShot(0 , this , [=](){
@@ -273,7 +268,7 @@ Widget::Widget(QWidget *parent)
         ui->join_meeting_btn->setDisabled(false);
         m_localIp = ip;
         m_localPort = port;
-
+        m_videoSendThread->setLocalAddress(ip , port);
 
     });
 
@@ -303,7 +298,6 @@ Widget::Widget(QWidget *parent)
     connect(ui->connect_btn ,&QPushButton::clicked , this , &Widget::connect_to_server);
     connect(ui->send_msg_btn , &QPushButton::clicked , this , &Widget::send_msg);
     connect(ui->create_meeting_btn , &QPushButton::clicked , this , &Widget::create_meeting);
-    connect(m_socket , &MyTcpSocket::messageRecevied , this , &Widget::handleMessage);
     connect(ui->join_meeting_btn , &QPushButton::clicked , this , &Widget::join_meeting);
 }
 
@@ -317,6 +311,7 @@ Widget::~Widget()
     },Qt::BlockingQueuedConnection);
     m_sockThread->quit();
     m_sockThread->wait();
+    m_videoSendThread->stop();
 
     delete ui;
 }
@@ -400,121 +395,93 @@ void Widget::create_meeting()
     roommember_count = 1;
 }
 
-void Widget::handleMessage(msgType type , quint32 ip , QByteArray data)
+void Widget::handleMessage()
 {
-    if(type == msgType::CREATE_MEETING_RESPONSE)
+    MESG msg;
+    while(queue_recv.try_pop(msg))
     {
-        if(data.size() != sizeof(quint32))
+        msgType type = msg.msg_type;
+        quint32 ip = msg.ip;
+        QByteArray data = msg.data;
+        if(type == msgType::CREATE_MEETING_RESPONSE)
         {
-            return;
-        }
-        quint32 roomNo = qFromBigEndian<quint32>(data.constData());
-        if(roomNo <= 100000)
-        {
-            QTimer::singleShot(0 , this , [=](){
-                QMessageBox::information(this , "错误" , "创建房间失败");
-            });
-        }
-        else
-        {
-            QTimer::singleShot(0 , this , [=](){
-                QMessageBox::information(this , "成功" , "成功创建房间");
-            });
-            ui->out_log->setText(QString("已加入房间%1").arg(roomNo));
-            ui->meeting_no_edit->setText(QString::number(roomNo));
-            ui->create_meeting_btn->setDisabled(true);
-            ui->join_meeting_btn->setDisabled(true);
-            ui->exit_meeting_btn->setDisabled(false);
-            ui->open_camera_btn->setDisabled(false);
-            ui->open_audio_out_btn->setDisabled(false);
-            ui->open_audio_btn->setDisabled(false);
-        }
-    }
-    else if(type == msgType::JOIN_MEETING_RESPONSE)
-    {
-        if(data.size() != sizeof(quint32))
-        {
-            return;
-        }
-        quint32 roomNo = qFromBigEndian<quint32>(data.constData());
-        if(roomNo == 0)
-        {
-            QTimer::singleShot(0 , this , [=](){
-                QMessageBox::information(this , "失败"  , "加入房间失败");
-            });
-        }
-        else if(roomNo > 100000)
-        {
-            QTimer::singleShot(0 , this , [=](){
-                    QMessageBox::information(this , "成功" , "成功加入房间");
-            });
-            ui->create_meeting_btn->setDisabled(true);
-            ui->join_meeting_btn->setDisabled(true);
-            ui->exit_meeting_btn->setDisabled(false);
-            ui->open_camera_btn->setDisabled(false);
-            ui->open_audio_out_btn->setDisabled(false);
-            ui->open_audio_btn->setDisabled(false);
-        }
-    }
-    else if(type == msgType::TEXT_RECV)
-    {
-        //quint16 port = qFromBigEndian<quint16>(data.constData());
-
-        QByteArray decompressed = qUncompress(data.mid(2));
-        QString text = QString::fromUtf8(decompressed);
-        ChatMessage* msg = new ChatMessage(text , false , m_avatar , ui->msg_list_widget);
-        QListWidgetItem* item = new QListWidgetItem(ui->msg_list_widget);
-        item->setSizeHint(msg->sizeHint());
-        ui->msg_list_widget->addItem(item);
-        ui->msg_list_widget->setItemWidget(item , msg);
-        ui->msg_list_widget->scrollToBottom();
-    }
-    else if(type == msgType::PARTNER_JOIN)
-    {
-        quint16 port = qFromBigEndian<quint16>(data.constData());
-        qDebug() << QHostAddress(ip).toString() << ":" << port;
-        quint64 key = makeKey(ip , port);
-        QHostAddress addr = QHostAddress(ip);
-        QString name = QString("user_%1").arg(roommember_count++);
-        Partner* partner = new Partner(m_avatar , name , addr , this);
-        QListWidgetItem* item = new QListWidgetItem(ui->partner_list_widget);
-        item->setSizeHint(partner->sizeHint());
-        ui->partner_list_widget->addItem(item);
-        ui->partner_list_widget->setItemWidget(item , partner);
-        m_partnerMap.insert(key , item);
-
-        VideoCell *cell = new VideoCell(name , ui->show_scroll_area);
-        int cols = 2;
-        int row = (m_videoCellCount) / cols;
-        int col = (m_videoCellCount) % cols;
-        m_gridLayout->addWidget(cell , row , col);
-        m_videoCellMap.insert(key , cell);
-        m_videoCellCount++;
-
-        qDebug() << "PARTNER_JOIN: ip =" << QHostAddress(ip).toString()
-                 << "port =" << port << "key =" << key;
-    }
-    else if(type == msgType::PARTNER_JOIN2)
-    {
-        QDataStream ds(data);
-        while(true)
-        {
-            quint32 ip;
-            quint16 port;
-            ds >> ip >> port;
-            if(ds.status() != QDataStream::Ok)
+            if(data.size() != sizeof(quint32))
             {
-                break;
+                return;
             }
-            QString name = QString("user_%1").arg(roommember_count++);
+            quint32 roomNo = qFromBigEndian<quint32>(data.constData());
+            if(roomNo <= 100000)
+            {
+                QTimer::singleShot(0 , this , [=](){
+                    QMessageBox::information(this , "错误" , "创建房间失败");
+                });
+            }
+            else
+            {
+                QTimer::singleShot(0 , this , [=](){
+                    QMessageBox::information(this , "成功" , "成功创建房间");
+                });
+                ui->out_log->setText(QString("已加入房间%1").arg(roomNo));
+                ui->meeting_no_edit->setText(QString::number(roomNo));
+                ui->create_meeting_btn->setDisabled(true);
+                ui->join_meeting_btn->setDisabled(true);
+                ui->exit_meeting_btn->setDisabled(false);
+                ui->open_camera_btn->setDisabled(false);
+                ui->open_audio_out_btn->setDisabled(false);
+                ui->open_audio_btn->setDisabled(false);
+            }
+        }
+        else if(type == msgType::JOIN_MEETING_RESPONSE)
+        {
+            if(data.size() != sizeof(quint32))
+            {
+                return;
+            }
+            quint32 roomNo = qFromBigEndian<quint32>(data.constData());
+            if(roomNo == 0)
+            {
+                QTimer::singleShot(0 , this , [=](){
+                    QMessageBox::information(this , "失败"  , "加入房间失败");
+                });
+            }
+            else if(roomNo > 100000)
+            {
+                QTimer::singleShot(0 , this , [=](){
+                    QMessageBox::information(this , "成功" , "成功加入房间");
+                });
+                ui->create_meeting_btn->setDisabled(true);
+                ui->join_meeting_btn->setDisabled(true);
+                ui->exit_meeting_btn->setDisabled(false);
+                ui->open_camera_btn->setDisabled(false);
+                ui->open_audio_out_btn->setDisabled(false);
+                ui->open_audio_btn->setDisabled(false);
+            }
+        }
+        else if(type == msgType::TEXT_RECV)
+        {
+            //quint16 port = qFromBigEndian<quint16>(data.constData());
+
+            QByteArray decompressed = qUncompress(data.mid(2));
+            QString text = QString::fromUtf8(decompressed);
+            ChatMessage* msg = new ChatMessage(text , false , m_avatar , ui->msg_list_widget);
+            QListWidgetItem* item = new QListWidgetItem(ui->msg_list_widget);
+            item->setSizeHint(msg->sizeHint());
+            ui->msg_list_widget->addItem(item);
+            ui->msg_list_widget->setItemWidget(item , msg);
+            ui->msg_list_widget->scrollToBottom();
+        }
+        else if(type == msgType::PARTNER_JOIN)
+        {
+            quint16 port = qFromBigEndian<quint16>(data.constData());
+            qDebug() << QHostAddress(ip).toString() << ":" << port;
+            quint64 key = makeKey(ip , port);
             QHostAddress addr = QHostAddress(ip);
+            QString name = QString("user_%1").arg(roommember_count++);
             Partner* partner = new Partner(m_avatar , name , addr , this);
             QListWidgetItem* item = new QListWidgetItem(ui->partner_list_widget);
             item->setSizeHint(partner->sizeHint());
             ui->partner_list_widget->addItem(item);
             ui->partner_list_widget->setItemWidget(item , partner);
-            qDebug() << QHostAddress(ip).toString() << ":" << port;
-            quint64 key = makeKey(ip , port);
             m_partnerMap.insert(key , item);
 
             VideoCell *cell = new VideoCell(name , ui->show_scroll_area);
@@ -524,71 +491,107 @@ void Widget::handleMessage(msgType type , quint32 ip , QByteArray data)
             m_gridLayout->addWidget(cell , row , col);
             m_videoCellMap.insert(key , cell);
             m_videoCellCount++;
+
             qDebug() << "PARTNER_JOIN: ip =" << QHostAddress(ip).toString()
                      << "port =" << port << "key =" << key;
         }
-    }
-    else if(type == msgType::PARTNER_EXIT)
-    {
-        quint16 port = qFromBigEndian<quint16>(data.constData());
-        quint64 key = makeKey(ip , port);
-        QListWidgetItem* itemToRemove = m_partnerMap.value(key , nullptr);
-        if(itemToRemove!= nullptr)
+        else if(type == msgType::PARTNER_JOIN2)
         {
-            QWidget* itemWidget = ui->partner_list_widget->itemWidget(itemToRemove);
-            if(itemWidget!= nullptr)
+            QDataStream ds(data);
+            while(true)
             {
-                delete itemWidget;
+                quint32 ip;
+                quint16 port;
+                ds >> ip >> port;
+                if(ds.status() != QDataStream::Ok)
+                {
+                    break;
+                }
+                QString name = QString("user_%1").arg(roommember_count++);
+                QHostAddress addr = QHostAddress(ip);
+                Partner* partner = new Partner(m_avatar , name , addr , this);
+                QListWidgetItem* item = new QListWidgetItem(ui->partner_list_widget);
+                item->setSizeHint(partner->sizeHint());
+                ui->partner_list_widget->addItem(item);
+                ui->partner_list_widget->setItemWidget(item , partner);
+                qDebug() << QHostAddress(ip).toString() << ":" << port;
+                quint64 key = makeKey(ip , port);
+                m_partnerMap.insert(key , item);
+
+                VideoCell *cell = new VideoCell(name , ui->show_scroll_area);
+                int cols = 2;
+                int row = (m_videoCellCount) / cols;
+                int col = (m_videoCellCount) % cols;
+                m_gridLayout->addWidget(cell , row , col);
+                m_videoCellMap.insert(key , cell);
+                m_videoCellCount++;
+                qDebug() << "PARTNER_JOIN: ip =" << QHostAddress(ip).toString()
+                         << "port =" << port << "key =" << key;
             }
-            int row = ui->partner_list_widget->row(itemToRemove);
-            delete ui->partner_list_widget->takeItem(row);
-            m_partnerMap.remove(key);
         }
-        VideoCell* cell = m_videoCellMap.value(key , nullptr);
-        if(cell != nullptr)
+        else if(type == msgType::PARTNER_EXIT)
         {
-            m_gridLayout->removeWidget(cell);
-            delete cell;
-            m_videoCellMap.remove(key);
-            m_videoCellCount--;
+            quint16 port = qFromBigEndian<quint16>(data.constData());
+            quint64 key = makeKey(ip , port);
+            QListWidgetItem* itemToRemove = m_partnerMap.value(key , nullptr);
+            if(itemToRemove!= nullptr)
+            {
+                QWidget* itemWidget = ui->partner_list_widget->itemWidget(itemToRemove);
+                if(itemWidget!= nullptr)
+                {
+                    delete itemWidget;
+                }
+                int row = ui->partner_list_widget->row(itemToRemove);
+                delete ui->partner_list_widget->takeItem(row);
+                m_partnerMap.remove(key);
+            }
+            VideoCell* cell = m_videoCellMap.value(key , nullptr);
+            if(cell != nullptr)
+            {
+                m_gridLayout->removeWidget(cell);
+                delete cell;
+                m_videoCellMap.remove(key);
+                m_videoCellCount--;
+            }
         }
-    }
-    else if(type == msgType::CLOSE_CAMERA)
-    {
-        quint16 port = qFromBigEndian<quint16>(data.constData());
-        quint64 key = makeKey(ip , port);
-        VideoCell* cell = m_videoCellMap.value(key , nullptr);
-        if(cell != nullptr)
+        else if(type == msgType::CLOSE_CAMERA)
         {
-            cell->clearImage();
+            quint16 port = qFromBigEndian<quint16>(data.constData());
+            quint64 key = makeKey(ip , port);
+            VideoCell* cell = m_videoCellMap.value(key , nullptr);
+            if(cell != nullptr)
+            {
+                cell->clearImage();
+            }
         }
-    }
-    else if(type == msgType::IMG_RECV)
-    {
-        quint16 port = qFromBigEndian<quint16>(data.constData());
-        qDebug() << "RECV ：" << QHostAddress(ip).toString()
-                 << "port =" << port ;
-        quint64 key = makeKey(ip, port);
-        QByteArray jpg = data.mid(2);
+        else if(type == msgType::IMG_RECV)
+        {
+            quint16 port = qFromBigEndian<quint16>(data.constData());
+            qDebug() << "RECV ：" << QHostAddress(ip).toString()
+                     << "port =" << port ;
+            quint64 key = makeKey(ip, port);
+            QByteArray jpg = data.mid(2);
 
-        QImage img = QImage::fromData(jpg);
+            QImage img = QImage::fromData(jpg);
 
-        VideoCell* cell = m_videoCellMap.value(key, nullptr);
-        if(cell != nullptr)
+            VideoCell* cell = m_videoCellMap.value(key, nullptr);
+            if(cell != nullptr)
+            {
+                cell->setImage(img);
+            }
+        }
+        else if(type == msgType::AUDIO_RECV)
         {
-            cell->setImage(img);
+            if(!m_audioOutputOn)
+            {
+                return;
+            }
+            //quint16 port = qFromBigEndian<quint16>(data.constData());
+            QByteArray pcm = qUncompress(data.mid(2));
+            m_audioOutput->writePcm(pcm);
         }
     }
-    else if(type == msgType::AUDIO_RECV)
-    {
-        if(!m_audioOutputOn)
-        {
-            return;
-        }
-        //quint16 port = qFromBigEndian<quint16>(data.constData());
-        QByteArray pcm = qUncompress(data.mid(2));
-        m_audioOutput->writePcm(pcm);
-    }
+
 }
 
 void Widget::join_meeting()
@@ -642,26 +645,7 @@ void Widget::handle_frame(QImage image)
         return ;
     }
     m_selfCell->setImage(image);
-
-    if(queue_send.size() > 10)
-    {
-        return;
-    }
-    QBuffer buffer;
-    buffer.open(QIODevice::WriteOnly);
-    image.save(&buffer , "JPEG" , 30);
-
-    MESG msg;
-    msg.msg_type = msgType::IMG_SEND;
-    if(m_localIp == 0 || m_localPort == 0)
-    {
-        return;
-    }
-    msg.ip = m_localIp;
-    quint16 n_port = qToBigEndian(m_localPort);
-    msg.data.append(reinterpret_cast<const char *>(& n_port), sizeof(n_port));
-    msg.data.append(buffer.data());
-    queue_send.push_msg(msg);
+    m_videoSendThread->pushLastestImage(image);
 }
 
 void Widget::onAudioData(const QByteArray pcm)

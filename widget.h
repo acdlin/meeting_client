@@ -1,6 +1,7 @@
 ﻿#ifndef WIDGET_H
 #define WIDGET_H
 
+#include "sendimg.h"
 #include "mytcpsocket.h"
 #include "myvideosurface.h"
 #include "audioinput.h"
@@ -52,12 +53,13 @@ private:
     WriteWorker *m_writeWorker;
     quint32 m_localIp = 0;
     quint16 m_localPort = 0;
+    SendImg *m_videoSendThread;
 
 private slots:
     void connect_to_server();
     void send_msg();
     void create_meeting();
-    void handleMessage(msgType type , quint32 ip , QByteArray data);
+    void handleMessage();
     void join_meeting();
     void handle_frame(QImage image);
     void onAudioData(const QByteArray pcm);
