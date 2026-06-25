@@ -1,8 +1,11 @@
 ﻿#include "sendimg.h"
 #include "netheader.h"
 #include "blockqueue.h"
+#include "logqueue.h"
 #include <QBuffer>
+#include <QString>
 #include <QtEndian>
+
 
 SendImg::SendImg(QObject *parent)
     : QThread{parent},m_ip(0),m_port(0), m_cameraOn(false) , m_hasLocalAddress(false)
@@ -82,7 +85,7 @@ void SendImg::run()
         QByteArray jpgData;
         QBuffer buffer(&jpgData);
         buffer.open(QIODevice::WriteOnly);
-        imageToSend.save(&buffer , "JPEG" , 30);
+        imageToSend.save(&buffer , "JPEG" , 50);
 
         MESG msg ;
         msg.ip = m_ip;
@@ -91,10 +94,12 @@ void SendImg::run()
         msg.data.append(reinterpret_cast<const char*>(&n_port) , sizeof(n_port));
         msg.data.append(jpgData);
 
-        if(queue_send.size() > 5)
+        if(queue_send.size() > 50)
         {
+            LOG_DEBUG(QString("queue_send too full , drop frame , queue size = %1").arg(queue_send.size()));
             continue;
         }
         queue_send.push_msg(msg);
+
     }
 }

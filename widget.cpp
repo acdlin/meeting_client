@@ -1,10 +1,11 @@
-﻿#include "widget.h"
+#include "widget.h"
 #include "ui_widget.h"
 #include "ChatMessage.h"
 #include "partner.h"
 #include "blockqueue.h"
 #include "netheader.h"
 #include "sendimg.h"
+#include "logqueue.h"
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
@@ -16,6 +17,7 @@
 
 QUEUE_DATA<MESG> queue_send(2000);
 QUEUE_DATA<MESG> queue_recv(500);
+QUEUE_DATA<LogEntry> queue_log(200);
 
 quint64 makeKey(quint32 ip , quint16 port)
 {
@@ -27,6 +29,9 @@ Widget::Widget(QWidget *parent)
     : QWidget(parent)
     , ui(new Ui::Widget),m_avatar(":/images/avator.jpg"),roommember_count(1),m_videoCellCount(1),m_cameraOn(false),m_audioInputOn(false),m_audioOutputOn(false)
 {
+    m_logWriter = new LogWriter();
+    m_logWriter->start();
+    LOG_INFO("app start.");
     m_videoSendThread = new SendImg(this);
     m_videoSendThread->start();
     m_sockThread = new QThread(this);
@@ -162,6 +167,7 @@ Widget::Widget(QWidget *parent)
             m_audioOutput->stopPlay();
         }
     });
+    connect(m_camera , QOverload<QCamera::Error>::of(&QCamera::error) , this , &Widget::camera_error);
     connect(ui->audio_slider , &QSlider::valueChanged , this , [=](){
         m_audioInput->setVolume(ui->audio_slider->value()/100.0);
     });
@@ -269,28 +275,98 @@ Widget::Widget(QWidget *parent)
         m_localIp = ip;
         m_localPort = port;
         m_videoSendThread->setLocalAddress(ip , port);
-
+        LOG_INFO(QString("连接成功:%1:%2").arg(ip).arg(port));
     });
 
     connect(m_socket , &MyTcpSocket::errorInfo , this , [=](QString errorString){
         QTimer::singleShot(0 , this , [=](){
             QMessageBox::warning(this , "失败" , errorString);
         });
-        ui->connect_btn->setDisabled(false);
-        ui->create_meeting_btn->setDisabled(true);
-        ui->join_meeting_btn->setDisabled(true);
-        ui->open_camera_btn->setDisabled(true);
-        ui->open_audio_out_btn->setDisabled(true);
-        ui->open_audio_btn->setDisabled(true);
+        if(m_cameraOn)
+        {
+            m_cameraOn = false;
+            m_videoSendThread->setCameraStatus(false);
+            m_videoSendThread->clearImage();
+            m_camera->stop();
+            ui->open_camera_btn->setText("打开摄像头");
+        }
 
+        if(m_audioInputOn)
+        {
+            m_audioInputOn = false;
+            m_audioInput->stopCollect();
+            ui->open_audio_btn->setText("打开麦克风");
+            ui->audio_slider->setValue(0);
+        }
+
+        if(m_audioOutputOn)
+        {
+            m_audioOutputOn = false;
+            m_audioOutput->stopPlay();
+            ui->open_audio_out_btn->setText("打开听筒");
+            ui->audio_out_slider->setValue(0);
+        }
+
+        queue_send.clear();
+        queue_recv.clear();
+
+        clearAllPartners();
+
+        m_localIp = 0;
+        m_localPort = 0;
+        ui->connect_btn->setEnabled(true);
+        ui->create_meeting_btn->setEnabled(false);
+        ui->join_meeting_btn->setEnabled(false);
+        ui->open_camera_btn->setEnabled(false);
+        ui->open_audio_btn->setEnabled(false);
+        ui->open_audio_out_btn->setEnabled(false);
+        ui->meeting_no_edit->clear();
+        ui->out_log->clear();
+        LOG_ERROR(QString("连接错误:%1").arg(errorString));
     });
     connect(m_socket , &MyTcpSocket::disconnected , this , [=](){
-        ui->connect_btn->setDisabled(false);
-        ui->create_meeting_btn->setDisabled(true);
-        ui->join_meeting_btn->setDisabled(true);
-        ui->open_camera_btn->setDisabled(true);
-        ui->open_audio_out_btn->setDisabled(true);
-        ui->open_audio_btn->setDisabled(true);
+        LOG_INFO(QString("连接断开"));
+        if(m_cameraOn)
+        {
+            m_cameraOn = false;
+            m_videoSendThread->setCameraStatus(false);
+            m_videoSendThread->clearImage();
+            m_camera->stop();
+            ui->open_camera_btn->setText("打开摄像头");
+        }
+
+        if(m_audioInputOn)
+        {
+            m_audioInputOn = false;
+            m_audioInput->stopCollect();
+            ui->open_audio_btn->setText("打开麦克风");
+            ui->audio_slider->setValue(0);
+        }
+
+        if(m_audioOutputOn)
+        {
+            m_audioOutputOn = false;
+            m_audioOutput->stopPlay();
+            ui->open_audio_out_btn->setText("打开听筒");
+            ui->audio_out_slider->setValue(0);
+        }
+
+        queue_send.clear();
+        queue_recv.clear();
+
+        clearAllPartners();
+
+        m_localIp = 0;
+        m_localPort = 0;
+        ui->connect_btn->setEnabled(true);
+        ui->create_meeting_btn->setEnabled(false);
+        ui->join_meeting_btn->setEnabled(false);
+        ui->open_camera_btn->setEnabled(false);
+        ui->open_audio_btn->setEnabled(false);
+        ui->open_audio_out_btn->setEnabled(false);
+        ui->meeting_no_edit->clear();
+        ui->out_log->clear();
+
     });
     connect(partner1 , &Partner::sendip , ui->out_log , [=](quint32 ip){
         ui->out_log->setText(QHostAddress(ip).toString());
@@ -301,9 +377,36 @@ Widget::Widget(QWidget *parent)
     connect(ui->join_meeting_btn , &QPushButton::clicked , this , &Widget::join_meeting);
 }
 
+void Widget::clearAllPartners()
+{
+
+    while(ui->partner_list_widget->count() > 1)
+    {
+        int last = ui->partner_list_widget->count() -1;
+        QListWidgetItem* item = ui->partner_list_widget->takeItem(last);
+        QWidget* widget = ui->partner_list_widget->itemWidget(item);
+        if(widget) delete widget;
+        delete item;
+    }
+    m_partnerMap.clear();
+
+    for(auto it = m_videoCellMap.begin(); it != m_videoCellMap.end(); ++it)
+    {
+        VideoCell* cell = it.value();
+        m_gridLayout->removeWidget(cell);
+        delete cell;
+    }
+    m_videoCellMap.clear();
+    m_videoCellCount = 1;  // 只剩自己
+}
+
 Widget::~Widget()
 {
-    QMetaObject::invokeMethod(m_writeWorker , &WriteWorker::stop , Qt::QueuedConnection);
+    m_videoSendThread->stop();
+    delete m_videoSendThread;
+
+    QMetaObject::invokeMethod(m_writeWorker , &WriteWorker::stop , Qt::BlockingQueuedConnection);
+
     queue_send.clear();
 
     QMetaObject::invokeMethod(m_socket , [this](){
@@ -311,7 +414,11 @@ Widget::~Widget()
     },Qt::BlockingQueuedConnection);
     m_sockThread->quit();
     m_sockThread->wait();
-    m_videoSendThread->stop();
+
+    queue_recv.clear();
+
+    m_logWriter->stop();
+    delete m_logWriter;
 
     delete ui;
 }
@@ -344,7 +451,7 @@ void Widget::connect_to_server()
         });
         return;
     }
-    QMetaObject::invokeMethod(m_socket , "connectToServer", Qt::QueuedConnection , Q_ARG(const QString , ip) , Q_ARG(quint16 , port_num));
+    QMetaObject::invokeMethod(m_socket , "connectToServer", Qt::QueuedConnection , Q_ARG( QString , ip) , Q_ARG(quint16 , port_num));
 
 }
 
@@ -407,7 +514,7 @@ void Widget::handleMessage()
         {
             if(data.size() != sizeof(quint32))
             {
-                return;
+                continue;
             }
             quint32 roomNo = qFromBigEndian<quint32>(data.constData());
             if(roomNo <= 100000)
@@ -435,7 +542,7 @@ void Widget::handleMessage()
         {
             if(data.size() != sizeof(quint32))
             {
-                return;
+                continue;
             }
             quint32 roomNo = qFromBigEndian<quint32>(data.constData());
             if(roomNo == 0)
@@ -553,6 +660,15 @@ void Widget::handleMessage()
                 m_videoCellMap.remove(key);
                 m_videoCellCount--;
             }
+
+            // 重新排列剩余 VideoCell，填补空位（位置 0 留给自己 m_selfCell）
+            int idx = 1;
+            for(VideoCell* c : m_videoCellMap)
+            {
+                m_gridLayout->removeWidget(c);
+                m_gridLayout->addWidget(c , idx / 2 , idx % 2);
+                idx++;
+            }
         }
         else if(type == msgType::CLOSE_CAMERA)
         {
@@ -567,8 +683,6 @@ void Widget::handleMessage()
         else if(type == msgType::IMG_RECV)
         {
             quint16 port = qFromBigEndian<quint16>(data.constData());
-            qDebug() << "RECV ：" << QHostAddress(ip).toString()
-                     << "port =" << port ;
             quint64 key = makeKey(ip, port);
             QByteArray jpg = data.mid(2);
 
@@ -579,12 +693,13 @@ void Widget::handleMessage()
             {
                 cell->setImage(img);
             }
+
         }
         else if(type == msgType::AUDIO_RECV)
         {
             if(!m_audioOutputOn)
             {
-                return;
+                continue;
             }
             //quint16 port = qFromBigEndian<quint16>(data.constData());
             QByteArray pcm = qUncompress(data.mid(2));
@@ -594,6 +709,44 @@ void Widget::handleMessage()
 
 }
 
+void Widget::camera_error(QCamera::Error error)
+{
+    if(error == QCamera::NoError) return;
+
+    QString msg;
+    switch(error)
+    {
+    case QCamera::CameraError:
+        msg = "摄像头发生错误";
+        break;
+    case QCamera::InvalidRequestError:
+        msg = "无效请求";
+        break;
+    case QCamera::ServiceMissingError:
+        msg = "摄像头服务缺失";
+        break;
+    case QCamera::NotSupportedFeatureError:
+        msg = "不支持此功能";
+        break;
+    default:
+        msg = QString("未知错误: %1").arg(error);
+        break;
+    }
+
+    LOG_ERROR(msg);
+    QTimer::singleShot(0 , this  , [=](){
+        QMessageBox::warning(this, "摄像头错误", msg);
+    });
+
+    if(m_cameraOn)
+    {
+        m_cameraOn = false;
+        m_videoSendThread->setCameraStatus(false);
+        m_videoSendThread->clearImage();
+        m_camera->stop();
+        ui->open_camera_btn->setText("打开摄像头");
+    }
+}
 void Widget::join_meeting()
 {
     bool ok;

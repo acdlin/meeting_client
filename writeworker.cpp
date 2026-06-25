@@ -27,7 +27,7 @@ void WriteWorker::drainOnce()
     MESG msg;
     while(queue_send.try_pop(msg))
     {
-        if(m_socket)
+        if(m_socket->state() == QAbstractSocket::ConnectedState)
         {
             m_socket->write(packMessage(msg));
         }

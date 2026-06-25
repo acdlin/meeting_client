@@ -12,6 +12,7 @@ SOURCES += \
     audioinput.cpp \
     audiooutput.cpp \
     chatmessage.cpp \
+    logqueue.cpp \
     main.cpp \
     mytcpsocket.cpp \
     myvideosurface.cpp \
@@ -27,6 +28,7 @@ HEADERS += \
     audiooutput.h \
     blockqueue.h \
     chatmessage.h \
+    logqueue.h \
     mytcpsocket.h \
     myvideosurface.h \
     netheader.h \

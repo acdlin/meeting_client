@@ -8,6 +8,7 @@
 #include "videocell.h"
 #include "audiooutput.h"
 #include "writeworker.h"
+#include "logqueue.h"
 #include <QWidget>
 #include <QMap>
 #include <QListWidgetItem>
@@ -31,6 +32,7 @@ public:
 
 protected:
     bool eventFilter(QObject * watched , QEvent *event) override;
+    void clearAllPartners();
 
 private:
     Ui::Widget *ui;
@@ -54,6 +56,7 @@ private:
     quint32 m_localIp = 0;
     quint16 m_localPort = 0;
     SendImg *m_videoSendThread;
+    LogWriter *m_logWriter;
 
 private slots:
     void connect_to_server();
@@ -63,5 +66,6 @@ private slots:
     void join_meeting();
     void handle_frame(QImage image);
     void onAudioData(const QByteArray pcm);
+    void camera_error(QCamera::Error error);
 };
 #endif // WIDGET_H

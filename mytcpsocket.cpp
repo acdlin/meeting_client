@@ -1,4 +1,4 @@
-﻿#include "mytcpsocket.h"
+#include "mytcpsocket.h"
 #include <cstring>
 #include <QHostAddress>
 #include <QThread>
@@ -9,7 +9,11 @@ MyTcpSocket::MyTcpSocket(QObject *parent) : QTcpSocket(parent)
     connect(this , &QTcpSocket::connected , this  , [=](){
         emit connectedInfo(this->localAddress().toIPv4Address() , this->localPort());
     });
-    connect(this , &QTcpSocket::errorOccurred , this , [=](){
+    connect(this , &QTcpSocket::errorOccurred , this , [this](QAbstractSocket::SocketError err){
+        if(err == QAbstractSocket::RemoteHostClosedError)
+        {
+            return;
+        }
         emit errorInfo(errorString());
     });
 }

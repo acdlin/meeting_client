@@ -1,4 +1,4 @@
-﻿#include "audioinput.h"
+#include "audioinput.h"
 
 AudioInput::AudioInput(QObject* parent): QObject(parent)
 {
@@ -36,13 +36,15 @@ void AudioInput::startCollect()
 {
     m_device = m_audioInput->start();
     m_timer->start(40);
-    connect(m_device , &QIODevice::readyRead , this , &AudioInput::onReadyRead);
+    connect(m_device , &QIODevice::readyRead , this , &AudioInput::onReadyRead , Qt::UniqueConnection);
 }
 
 void AudioInput::stopCollect()
 {
     m_audioInput->stop();
     m_timer->stop();
+    m_buffer.clear();
+    m_device = nullptr;
 }
 
 AudioInput::~AudioInput()

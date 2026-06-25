@@ -44,5 +44,6 @@ struct MESG
     QByteArray data;
 };
 
+
 QByteArray packMessage(const MESG& msg);
 #endif // NETHEADER_H

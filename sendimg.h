@@ -1,6 +1,7 @@
 ﻿#ifndef SENDIMG_H
 #define SENDIMG_H
 
+
 #include <QThread>
 #include <QMutex>
 #include <QImage>
@@ -34,12 +35,11 @@ private:
     QMutex m_mutex;
     QWaitCondition m_condition;
     QImage m_pendingImg;
-    bool m_cameraOn;
+    QAtomicInt m_cameraOn;
     QAtomicInt m_quit;
     bool m_hasLocalAddress;
 
 };
-
 
 
 #endif // SENDIMG_H
