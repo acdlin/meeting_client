@@ -129,10 +129,3 @@ make        # 或 nmake / jom
 - **线程退出顺序**：先停 SendImg（生产者）→ 停 WriteWorker → 关闭 socket → 退出 socket 线程 → 停 LogWriter
 - **跨线程 UI 操作**：网络线程中需要弹窗时使用 `QTimer::singleShot(0, this, ...)` 切回主线程
 
-## 已知问题
-
-详见 `BUG.md`（如需）。主要待优化项：
-- 远端正常断开时会弹出"失败"错误框（`RemoteHostClosedError` 未过滤）
-- 音频输入定时器间隔 40ms、输出缓冲 50KB，可分别降至 20ms / 8-10KB 以减少延迟
-- 参与者退出后视频网格不自动重排，会留空位
-- AudioInput 多次开关麦克风会重复连接 `readyRead` 信号
