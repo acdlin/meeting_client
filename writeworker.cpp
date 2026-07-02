@@ -1,4 +1,5 @@
 ﻿#include "writeworker.h"
+#include "logqueue.h"
 #include "blockqueue.h"
 #include "netheader.h"
 #include <QTcpSocket>
@@ -27,9 +28,31 @@ void WriteWorker::drainOnce()
     MESG msg;
     while(queue_send.try_pop(msg))
     {
-        if(m_socket->state() == QAbstractSocket::ConnectedState)
+        if(m_socket->state() != QAbstractSocket::ConnectedState)
         {
-            m_socket->write(packMessage(msg));
+            break;
         }
+
+        // socket buffer 积压检查
+        if(m_socket->bytesToWrite() > 200 * 1024)
+        {
+            // 视频帧：可丢，直接丢弃腾出队列空间
+            if(msg.msg_type == msgType::IMG_SEND)
+            {
+                LOG_DEBUG("socket buffer full, drop video frame");
+                continue;
+            }
+
+            if(msg.msg_type == msgType::AUDIO_SEND)
+            {
+                queue_send.push_front(msg);
+                continue;
+            }
+
+            queue_send.push_front(msg);
+            break;
+        }
+
+        m_socket->write(packMessage(msg));
     }
 }

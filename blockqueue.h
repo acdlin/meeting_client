@@ -37,6 +37,13 @@ public:
         m_notEmpty.wakeOne();
     }
 
+    void push_front(const T& t)
+    {
+        QMutexLocker locker(&m_mutex);
+        m_queue.push_front(t);
+        m_notEmpty.wakeOne();
+    }
+
 
     bool pop_msg(T& out)
     {
